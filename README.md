@@ -41,8 +41,6 @@ you should see a downloaded_sites folder if you didnt bother to change the file 
 
 "what is the webcopier.exe for if it's just a .bat file?"
 
-this is all for now as i dont have enough time currently.
-
 it's just to hide the code as if you edit the webcopier.bat, it should say this. @"%~dp0webcopy.exe" %*
 
 basically what that does, is that if you click the webcopier.bat it redirects to ur .exe if you decide to not click the .exe and the .bat instead it wont redirect to anything. i dont know why i decided to do this and im probably going to change this in the future.
