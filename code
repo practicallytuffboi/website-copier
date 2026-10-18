@@ -1,0 +1,1234 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Net;
+using System.Net.Security;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+
+[assembly: AssemblyTitle("WebCopy")]
+[assembly: AssemblyDescription("Open source website copier CLI tool")]
+[assembly: AssemblyCompany("practicallytuffboi")]
+[assembly: AssemblyProduct("WebCopy")]
+[assembly: AssemblyCopyright("Copyright (c) 2026 practicallytuffboi")]
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: RuntimeCompatibility(WrapNonExceptionThrows = true)]
+[assembly: CompilationRelaxations(8)]
+
+internal class Program
+{
+	private static void Main(string[] args)
+	{
+		ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
+		// SSL certificate validation uses system defaults
+		ServicePointManager.DefaultConnectionLimit = 64;
+		ServicePointManager.Expect100Continue = false;
+		ServicePointManager.UseNagleAlgorithm = false;
+		
+		WebRequest.DefaultWebProxy = null;
+		ThreadPool.SetMinThreads(64, 64);
+		string text = "";
+		string text2 = "";
+		int result = 999999;
+		int result2 = 999999;
+		bool open = true;
+		bool bundle = true;
+		bool flag = false;
+		if (args.Length == 0)
+		{
+			flag = true;
+			while (string.IsNullOrEmpty(text))
+			{
+				Console.ForegroundColor = ConsoleColor.Blue;
+				Console.Write("enter target website url: ");
+				Console.ResetColor();
+				text = Console.ReadLine();
+				if (text != null)
+				{
+					text = text.Trim();
+				}
+				if (!string.IsNullOrEmpty(text))
+				{
+					if (!text.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+					{
+						text = "https://" + text;
+					}
+					Uri result3;
+					if (!Uri.TryCreate(text, UriKind.Absolute, out result3) || string.IsNullOrEmpty(result3.Host))
+					{
+						Console.ForegroundColor = ConsoleColor.Red;
+						Console.WriteLine("invalid url. try again.");
+						Console.ResetColor();
+						text = "";
+					}
+				}
+			}
+			Uri uri = new Uri(text);
+			string text3 = Path.Combine(Directory.GetCurrentDirectory(), "downloaded_sites", uri.Host.ToLowerInvariant());
+			Console.ForegroundColor = ConsoleColor.Green;
+			Console.Write("output directory [default: " + text3.ToLowerInvariant() + "]: ");
+			Console.ResetColor();
+			string text4 = Console.ReadLine();
+			text2 = (string.IsNullOrEmpty(text4) ? text3 : text4.Trim());
+			Console.ForegroundColor = ConsoleColor.Green;
+			Console.Write("create single-file bundle? (y/n) [default: y]: ");
+			Console.ResetColor();
+			string text5 = Console.ReadLine();
+			if (!string.IsNullOrEmpty(text5) && text5.Trim().Equals("n", StringComparison.OrdinalIgnoreCase))
+			{
+				bundle = false;
+			}
+			Console.ForegroundColor = ConsoleColor.Green;
+			Console.Write("open in browser when complete? (y/n) [default: y]: ");
+			Console.ResetColor();
+			string text6 = Console.ReadLine();
+			if (!string.IsNullOrEmpty(text6) && text6.Trim().Equals("n", StringComparison.OrdinalIgnoreCase))
+			{
+				open = false;
+			}
+		}
+		else
+		{
+			text = args[0].Trim();
+			switch (text)
+			{
+			case "-h":
+			case "--help":
+			case "/?":
+				PrintHelp();
+				return;
+			}
+			if (!text.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+			{
+				text = "https://" + text;
+			}
+			Uri uri2 = new Uri(text);
+			text2 = Path.Combine(Directory.GetCurrentDirectory(), "downloaded_sites", uri2.Host.ToLowerInvariant());
+			for (int num = 1; num < args.Length; num++)
+			{
+				string text7 = args[num].ToLowerInvariant();
+				if ((text7 == "-o" || text7 == "--output") && num + 1 < args.Length)
+				{
+					text2 = args[++num];
+					continue;
+				}
+				if ((text7 == "-d" || text7 == "--depth") && num + 1 < args.Length)
+				{
+					int.TryParse(args[++num], out result);
+					continue;
+				}
+				if ((text7 == "-m" || text7 == "--max-pages") && num + 1 < args.Length)
+				{
+					int.TryParse(args[++num], out result2);
+					continue;
+				}
+				switch (text7)
+				{
+				case "--no-open":
+					open = false;
+					break;
+				case "-s":
+				case "--single-file":
+				case "--bundle":
+					bundle = true;
+					break;
+				case "--no-bundle":
+					bundle = false;
+					break;
+				case "-h":
+				case "--help":
+				case "/?":
+					PrintHelp();
+					return;
+				}
+			}
+		}
+		Copier copier = new Copier(text, text2, result, result2, open, bundle);
+		copier.Run();
+		if (flag)
+		{
+			Console.WriteLine();
+			Console.ForegroundColor = ConsoleColor.DarkGray;
+			Console.WriteLine("press any key to exit...");
+			Console.ResetColor();
+			Console.ReadKey();
+		}
+	}
+
+	private static void PrintHelp()
+	{
+		Console.WriteLine("usage:");
+		Console.WriteLine("  webcopy <url> [options]");
+		Console.WriteLine();
+		Console.WriteLine("options:");
+		Console.WriteLine("  -o, --output <dir>       custom output directory");
+		Console.WriteLine("  -d, --depth <n>          maximum crawl depth (default: unlimited)");
+		Console.WriteLine("  -m, --max-pages <n>      maximum pages to clone (default: unlimited)");
+		Console.WriteLine("  -s, --single-file        create a standalone bundled .html file (default: on)");
+		Console.WriteLine("  --no-bundle              skip single-file html bundle creation");
+		Console.WriteLine("  --no-open                do not open browser when download completes");
+		Console.WriteLine("  -h, --help               show this help menu");
+	}
+}
+internal class PageData
+{
+	public string Url;
+
+	public string LocalRelPath;
+
+	public string Content;
+
+	public PageData(string url, string path, string content)
+	{
+		Url = url;
+		LocalRelPath = path;
+		Content = content;
+	}
+}
+internal class CssData
+{
+	public string Url;
+
+	public string LocalRelPath;
+
+	public string Content;
+
+	public CssData(string url, string path, string content)
+	{
+		Url = url;
+		LocalRelPath = path;
+		Content = content;
+	}
+}
+internal class Copier
+{
+	private string startUrl;
+
+	private string outputDir;
+
+	private int maxDepth;
+
+	private int maxPages;
+
+	private bool openBrowser;
+
+	private bool bundleSingleFile;
+
+	private string baseHost;
+
+	private long totalBytes;
+
+	private int pagesCount;
+
+	private int assetsCount;
+
+	private string firstLocalFile;
+
+	private object consoleLock = new object();
+
+	private object mapLock = new object();
+
+	private ConcurrentDictionary<string, object> fileLocks = new ConcurrentDictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+	private ConcurrentBag<string> failedList = new ConcurrentBag<string>();
+
+	private Dictionary<string, string> urlMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+	private HashSet<string> visitedPages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+	private HashSet<string> visitedAssets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+	private List<PageData> pagesList = new List<PageData>();
+
+	private List<CssData> cssList = new List<CssData>();
+
+	private static readonly Regex TagRegex = new Regex("<(img|script|link|source|video|audio|track|embed|object)[^>]*?\\s(src|href|data|poster)\\s*=\\s*(?:[\"'](?<val>[^\"'#\\s>]+)[\"']|(?<val>[^\"'#\\s>]+))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+	private static readonly Regex AnchorRegex = new Regex("<(a|area)[^>]*?\\shref\\s*=\\s*(?:[\"'](?<val>[^\"'\\s>]+)[\"']|(?<val>[^\"'\\s>]+))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+	private static readonly Regex CssUrlRegex = new Regex("url\\(\\s*(?:[\"'](?<val>[^\"'\\)]+)[\"']|(?<val>[^\"'\\)\\s]+))\\s*\\)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+	private static readonly Regex CssImportRegex = new Regex("@import\\s+(?:[\"'](?<val>[^\"';]+)[\"']|url\\(\\s*[\"']?(?<val>[^\"'\\)]+)[\"']?\\s*\\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+	private static readonly Regex ScriptTagRegex = new Regex("<script\\b[^>]*?>[\\s\\S]*?</script>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+	public Copier(string url, string outDir, int depth, int maxP, bool open, bool bundle)
+	{
+		startUrl = StripFragment(url);
+		outputDir = Path.GetFullPath(outDir);
+		maxDepth = depth;
+		maxPages = maxP;
+		openBrowser = open;
+		bundleSingleFile = bundle;
+		baseHost = new Uri(startUrl).Host.ToLowerInvariant();
+	}
+
+	private static bool IsTracker(string str)
+	{
+		if (string.IsNullOrEmpty(str))
+		{
+			return false;
+		}
+		string text = str.ToLowerInvariant();
+		if (!text.Contains("google-analytics") && !text.Contains("googletagmanager") && !text.Contains("analytics.js") && !text.Contains("gtag/js") && !text.Contains("gtag(") && !text.Contains("doubleclick.net") && !text.Contains("connect.facebook.net") && !text.Contains("fbevents.js") && !text.Contains("clarity.ms") && !text.Contains("hotjar.com") && !text.Contains("scorecardresearch.com") && !text.Contains("trustwave.com") && !text.Contains("quantserve.com") && !text.Contains("adservice.google") && !text.Contains("googlesyndication") && !text.Contains("statcounter.com") && !text.Contains("histats.com") && !text.Contains("yandex.ru") && !text.Contains("beacon.js"))
+		{
+			return text.Contains("pixel");
+		}
+		return true;
+	}
+
+	private static bool IsBinaryExtension(string ext)
+	{
+		if (string.IsNullOrEmpty(ext))
+		{
+			return false;
+		}
+		string text = ext.ToLowerInvariant();
+		switch (text)
+		{
+		default:
+			return text == ".js";
+		case ".jpg":
+		case ".jpeg":
+		case ".png":
+		case ".gif":
+		case ".webp":
+		case ".svg":
+		case ".ico":
+		case ".bmp":
+		case ".pdf":
+		case ".zip":
+		case ".tar":
+		case ".gz":
+		case ".mp4":
+		case ".mp3":
+		case ".webm":
+		case ".ogg":
+		case ".wav":
+		case ".avi":
+		case ".woff":
+		case ".woff2":
+		case ".ttf":
+		case ".eot":
+		case ".css":
+			return true;
+		}
+	}
+
+	private void SafeWriteBytes(string path, byte[] data)
+	{
+		object orAdd = fileLocks.GetOrAdd(path, new object());
+		lock (orAdd)
+		{
+			try
+			{
+				string directoryName = Path.GetDirectoryName(path);
+				if (!string.IsNullOrEmpty(directoryName) && !Directory.Exists(directoryName))
+				{
+					Directory.CreateDirectory(directoryName);
+				}
+				File.WriteAllBytes(path, data);
+			}
+			catch
+			{
+			}
+		}
+	}
+
+	private void SafeWriteText(string path, string text)
+	{
+		object orAdd = fileLocks.GetOrAdd(path, new object());
+		lock (orAdd)
+		{
+			try
+			{
+				string directoryName = Path.GetDirectoryName(path);
+				if (!string.IsNullOrEmpty(directoryName) && !Directory.Exists(directoryName))
+				{
+					Directory.CreateDirectory(directoryName);
+				}
+				File.WriteAllText(path, text, Encoding.UTF8);
+			}
+			catch
+			{
+			}
+		}
+	}
+
+	public void Run()
+	{
+		Stopwatch stopwatch = Stopwatch.StartNew();
+		Console.WriteLine();
+		Console.ForegroundColor = ConsoleColor.Cyan;
+		Console.WriteLine("target: " + startUrl.ToLowerInvariant());
+		Console.WriteLine("output: " + outputDir.ToLowerInvariant());
+		Console.WriteLine("depth: " + ((maxDepth > 10000) ? "all" : maxDepth.ToString()));
+		Console.WriteLine("max pages: " + ((maxPages > 10000) ? "all" : maxPages.ToString()));
+		Console.WriteLine("single-file bundle: " + (bundleSingleFile ? "enabled" : "disabled"));
+		Console.ResetColor();
+		Console.WriteLine();
+		if (!Directory.Exists(outputDir))
+		{
+			Directory.CreateDirectory(outputDir);
+		}
+		Queue<Tuple<string, int>> queue = new Queue<Tuple<string, int>>();
+		queue.Enqueue(new Tuple<string, int>(startUrl, 0));
+		visitedPages.Add(startUrl);
+		string text = UrlToPath(startUrl, true);
+		urlMap[startUrl] = text;
+		firstLocalFile = Path.Combine(outputDir, text.Replace('/', Path.DirectorySeparatorChar));
+		ConcurrentQueue<string> concurrentQueue = new ConcurrentQueue<string>();
+		int num = 0;
+		while (queue.Count > 0 && pagesCount < maxPages)
+		{
+			Tuple<string, int> tuple = queue.Dequeue();
+			string item = tuple.Item1;
+			int item2 = tuple.Item2;
+			num++;
+			string finalUrl;
+			string contentType;
+			string errReason;
+			byte[] array = Fetch(item, out finalUrl, out contentType, out errReason);
+			if (array == null || array.Length == 0)
+			{
+				failedList.Add("[" + errReason + "] " + item);
+				lock (consoleLock)
+				{
+					Console.ForegroundColor = ConsoleColor.DarkGray;
+					Console.WriteLine("[html " + num + "] skipped (" + errReason + "): " + item.ToLowerInvariant());
+					Console.ResetColor();
+				}
+				continue;
+			}
+			finalUrl = StripFragment(finalUrl);
+			string value;
+			lock (mapLock)
+			{
+				if (!urlMap.TryGetValue(item, out value))
+				{
+					value = UrlToPath(finalUrl, true);
+					urlMap[item] = value;
+				}
+				urlMap[finalUrl] = value;
+			}
+			if (item.Equals(startUrl, StringComparison.OrdinalIgnoreCase) || finalUrl.Equals(startUrl, StringComparison.OrdinalIgnoreCase))
+			{
+				firstLocalFile = Path.Combine(outputDir, value.Replace('/', Path.DirectorySeparatorChar));
+			}
+			string text2 = Encoding.UTF8.GetString(array);
+			pagesList.Add(new PageData(finalUrl, value, text2));
+			pagesCount++;
+			Interlocked.Add(ref totalBytes, array.Length);
+			lock (consoleLock)
+			{
+				Console.ForegroundColor = ConsoleColor.Green;
+				Console.WriteLine("[0%] [html " + pagesCount + "/" + (queue.Count + pagesCount) + "] " + item.ToLowerInvariant());
+				Console.ResetColor();
+			}
+			Uri uri = new Uri(finalUrl);
+			MatchCollection matchCollection = TagRegex.Matches(text2);
+			foreach (Match item3 in matchCollection)
+			{
+				string text3 = item3.Groups["val"].Value.Trim('\'', '"', ' ', '\t', '\r', '\n').Replace("&amp;", "&");
+				if (string.IsNullOrEmpty(text3) || text3.StartsWith("data:", StringComparison.OrdinalIgnoreCase) || text3.StartsWith("#") || text3.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase) || IsTracker(text3))
+				{
+					continue;
+				}
+				if (text3.StartsWith("//"))
+				{
+					text3 = uri.Scheme + ":" + text3;
+				}
+				Uri result;
+				if (!Uri.TryCreate(uri, text3, out result) || (!(result.Scheme == Uri.UriSchemeHttp) && !(result.Scheme == Uri.UriSchemeHttps)))
+				{
+					continue;
+				}
+				string text4 = StripFragment(result.AbsoluteUri);
+				if (IsTracker(text4))
+				{
+					continue;
+				}
+				lock (mapLock)
+				{
+					if (!visitedAssets.Contains(text4))
+					{
+						visitedAssets.Add(text4);
+						concurrentQueue.Enqueue(text4);
+						if (!urlMap.ContainsKey(text4))
+						{
+							urlMap[text4] = UrlToPath(text4, false);
+						}
+					}
+				}
+			}
+			if (item2 >= maxDepth)
+			{
+				continue;
+			}
+			MatchCollection matchCollection2 = AnchorRegex.Matches(text2);
+			foreach (Match item4 in matchCollection2)
+			{
+				string text5 = item4.Groups["val"].Value.Trim('\'', '"', ' ', '\t', '\r', '\n').Replace("&amp;", "&");
+				if (string.IsNullOrEmpty(text5) || text5.StartsWith("data:", StringComparison.OrdinalIgnoreCase) || text5.StartsWith("#") || text5.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) || text5.StartsWith("tel:", StringComparison.OrdinalIgnoreCase) || text5.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase) || IsTracker(text5))
+				{
+					continue;
+				}
+				if (text5.StartsWith("//"))
+				{
+					text5 = uri.Scheme + ":" + text5;
+				}
+				Uri result2;
+				if (!Uri.TryCreate(uri, text5, out result2) || (!(result2.Scheme == Uri.UriSchemeHttp) && !(result2.Scheme == Uri.UriSchemeHttps)))
+				{
+					continue;
+				}
+				string text6 = StripFragment(result2.AbsoluteUri);
+				if (IsTracker(text6) || !result2.Host.ToLowerInvariant().Equals(baseHost, StringComparison.OrdinalIgnoreCase))
+				{
+					continue;
+				}
+				string text7 = Path.GetExtension(result2.AbsolutePath).ToLowerInvariant();
+				if (!IsBinaryExtension(text7) || !(text7 != ".html") || !(text7 != ".htm") || !(text7 != ".php") || !(text7 != ".asp") || !(text7 != ".aspx"))
+				{
+					lock (mapLock)
+					{
+						if (!visitedPages.Contains(text6) && pagesCount + queue.Count < maxPages)
+						{
+							visitedPages.Add(text6);
+							queue.Enqueue(new Tuple<string, int>(text6, item2 + 1));
+							if (!urlMap.ContainsKey(text6))
+							{
+								urlMap[text6] = UrlToPath(text6, true);
+							}
+						}
+					}
+					continue;
+				}
+				lock (mapLock)
+				{
+					if (!visitedAssets.Contains(text6))
+					{
+						visitedAssets.Add(text6);
+						concurrentQueue.Enqueue(text6);
+						if (!urlMap.ContainsKey(text6))
+						{
+							urlMap[text6] = UrlToPath(text6, false);
+						}
+					}
+				}
+			}
+		}
+		HashSet<string> collection = new HashSet<string>(concurrentQueue, StringComparer.OrdinalIgnoreCase);
+		List<string> list = new List<string>(collection);
+		int totalAssetCount = list.Count;
+		int completedAssets = 0;
+		ConcurrentQueue<string> nestedAssetQueue = new ConcurrentQueue<string>();
+		Parallel.ForEach(list, new ParallelOptions
+		{
+			MaxDegreeOfParallelism = 32
+		}, (string aUrl) =>
+		{
+			try
+			{
+				if (!IsTracker(aUrl))
+				{
+					string contentType2;
+					string errReason2;
+					string finalUrl2;
+					byte[] array2 = Fetch(aUrl, out finalUrl2, out contentType2, out errReason2);
+					if (array2 != null && array2.Length != 0)
+					{
+						finalUrl2 = StripFragment(finalUrl2);
+						Interlocked.Add(ref totalBytes, array2.Length);
+						Interlocked.Increment(ref assetsCount);
+						string value2;
+						lock (mapLock)
+						{
+							if (!urlMap.TryGetValue(aUrl, out value2))
+							{
+								value2 = UrlToPath(finalUrl2, false);
+								urlMap[aUrl] = value2;
+							}
+							urlMap[finalUrl2] = value2;
+						}
+						if ((contentType2 != null && contentType2.IndexOf("text/css", StringComparison.OrdinalIgnoreCase) >= 0) || value2.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+						{
+							string text10 = Encoding.UTF8.GetString(array2);
+							lock (cssList)
+							{
+								cssList.Add(new CssData(finalUrl2, value2, text10));
+							}
+							Uri uri2 = new Uri(finalUrl2);
+							MatchCollection matchCollection3 = CssUrlRegex.Matches(text10);
+							foreach (Match item5 in matchCollection3)
+							{
+								string text11 = item5.Groups["val"].Value.Trim('\'', '"', ' ', '\t', '\r', '\n').Replace("&amp;", "&");
+								if (!text11.StartsWith("data:", StringComparison.OrdinalIgnoreCase) && !text11.StartsWith("#") && !IsTracker(text11))
+								{
+									if (text11.StartsWith("//"))
+									{
+										text11 = uri2.Scheme + ":" + text11;
+									}
+									Uri result3;
+									if (Uri.TryCreate(uri2, text11, out result3) && (result3.Scheme == Uri.UriSchemeHttp || result3.Scheme == Uri.UriSchemeHttps))
+									{
+										string text12 = StripFragment(result3.AbsoluteUri);
+										if (!IsTracker(text12))
+										{
+											lock (mapLock)
+											{
+												if (!visitedAssets.Contains(text12))
+												{
+													visitedAssets.Add(text12);
+													nestedAssetQueue.Enqueue(text12);
+													if (!urlMap.ContainsKey(text12))
+													{
+														urlMap[text12] = UrlToPath(text12, false);
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+						else
+						{
+							string path = Path.Combine(outputDir, value2.Replace('/', Path.DirectorySeparatorChar));
+							SafeWriteBytes(path, array2);
+						}
+						int num2 = Interlocked.Increment(ref completedAssets);
+						int num3 = ((totalAssetCount > 0) ? (num2 * 100 / totalAssetCount) : 0);
+						lock (consoleLock)
+						{
+							Console.ForegroundColor = ConsoleColor.DarkCyan;
+							Console.WriteLine("[" + num3 + "%] [asset " + num2 + "/" + totalAssetCount + "] " + aUrl.ToLowerInvariant());
+							Console.ResetColor();
+							return;
+						}
+					}
+					failedList.Add("[" + errReason2 + "] " + aUrl);
+					int num4 = Interlocked.Increment(ref completedAssets);
+					int num5 = ((totalAssetCount > 0) ? (num4 * 100 / totalAssetCount) : 0);
+					lock (consoleLock)
+					{
+						Console.ForegroundColor = ConsoleColor.DarkGray;
+						Console.WriteLine("[" + num5 + "%] [asset " + num4 + "/" + totalAssetCount + "] skipped (" + errReason2 + "): " + aUrl.ToLowerInvariant());
+						Console.ResetColor();
+						return;
+					}
+				}
+			}
+			catch
+			{
+			}
+		});
+		if (!nestedAssetQueue.IsEmpty)
+		{
+			HashSet<string> collection2 = new HashSet<string>(nestedAssetQueue, StringComparer.OrdinalIgnoreCase);
+			List<string> source = new List<string>(collection2);
+			Parallel.ForEach(source, new ParallelOptions
+			{
+				MaxDegreeOfParallelism = 32
+			}, (string aUrl) =>
+			{
+				try
+				{
+					if (!IsTracker(aUrl))
+					{
+						string contentType2;
+						string errReason2;
+						string finalUrl2;
+						byte[] array2 = Fetch(aUrl, out finalUrl2, out contentType2, out errReason2);
+						if (array2 != null && array2.Length > 0)
+						{
+							finalUrl2 = StripFragment(finalUrl2);
+							Interlocked.Add(ref totalBytes, array2.Length);
+							Interlocked.Increment(ref assetsCount);
+							string value2;
+							lock (mapLock)
+							{
+								if (!urlMap.TryGetValue(aUrl, out value2))
+								{
+									value2 = UrlToPath(finalUrl2, false);
+									urlMap[aUrl] = value2;
+								}
+								urlMap[finalUrl2] = value2;
+							}
+							string path = Path.Combine(outputDir, value2.Replace('/', Path.DirectorySeparatorChar));
+							SafeWriteBytes(path, array2);
+						}
+						else
+						{
+							failedList.Add("[" + errReason2 + "] " + aUrl);
+						}
+					}
+				}
+				catch
+				{
+				}
+			});
+		}
+		Parallel.ForEach(cssList, new ParallelOptions
+		{
+			MaxDegreeOfParallelism = 32
+		}, (CssData cd) =>
+		{
+			try
+			{
+				string text10 = RewriteCss(cd.Content, cd.Url, cd.LocalRelPath);
+				string path = Path.Combine(outputDir, cd.LocalRelPath.Replace('/', Path.DirectorySeparatorChar));
+				SafeWriteText(path, text10);
+			}
+			catch
+			{
+			}
+		});
+		Parallel.ForEach(pagesList, new ParallelOptions
+		{
+			MaxDegreeOfParallelism = 32
+		}, (PageData pd) =>
+		{
+			try
+			{
+				string text10 = RewriteHtml(pd.Content, pd.Url, pd.LocalRelPath);
+				string path = Path.Combine(outputDir, pd.LocalRelPath.Replace('/', Path.DirectorySeparatorChar));
+				SafeWriteText(path, text10);
+			}
+			catch
+			{
+			}
+		});
+		string text8 = "";
+		if (bundleSingleFile && File.Exists(firstLocalFile))
+		{
+			try
+			{
+				text8 = Path.Combine(outputDir, "bundle.html");
+				CreateSingleFileBundle(firstLocalFile, text8);
+			}
+			catch
+			{
+			}
+		}
+		string text9 = "";
+		if (failedList.Count > 0)
+		{
+			try
+			{
+				text9 = Path.Combine(outputDir, "failed.txt");
+				List<string> list2 = new List<string>(failedList);
+				list2.Sort(StringComparer.OrdinalIgnoreCase);
+				File.WriteAllLines(text9, list2.ToArray());
+			}
+			catch
+			{
+			}
+		}
+		stopwatch.Stop();
+		Console.WriteLine();
+		Console.ForegroundColor = ConsoleColor.Green;
+		Console.WriteLine("[100%] copy completed");
+		Console.ResetColor();
+		Console.WriteLine("pages cloned: " + pagesCount);
+		Console.WriteLine("assets downloaded: " + assetsCount);
+		if (failedList.Count > 0)
+		{
+			Console.ForegroundColor = ConsoleColor.Yellow;
+			Console.WriteLine("failed downloads: " + failedList.Count + " (saved to failed.txt)");
+			Console.ResetColor();
+		}
+		else
+		{
+			Console.WriteLine("failed downloads: 0");
+		}
+		Console.WriteLine("total size: " + FormatBytes(totalBytes));
+		Console.WriteLine("time taken: " + stopwatch.Elapsed.TotalSeconds.ToString("0.00") + "s");
+		Console.WriteLine("saved location: " + outputDir.ToLowerInvariant());
+		Console.WriteLine();
+		if (File.Exists(firstLocalFile))
+		{
+			Console.ForegroundColor = ConsoleColor.Yellow;
+			Console.WriteLine("offline entry: " + firstLocalFile.ToLowerInvariant());
+			Console.ResetColor();
+		}
+		if (!string.IsNullOrEmpty(text8) && File.Exists(text8))
+		{
+			Console.ForegroundColor = ConsoleColor.Cyan;
+			Console.WriteLine("single-file bundle: " + text8.ToLowerInvariant());
+			Console.ResetColor();
+		}
+		if (openBrowser && File.Exists(firstLocalFile))
+		{
+			try
+			{
+				ProcessStartInfo processStartInfo = new ProcessStartInfo(firstLocalFile);
+				processStartInfo.UseShellExecute = true;
+				Process.Start(processStartInfo);
+			}
+			catch
+			{
+			}
+		}
+	}
+
+	private void CreateSingleFileBundle(string entryPath, string outBundlePath)
+	{
+		if (!File.Exists(entryPath))
+		{
+			return;
+		}
+		string input = File.ReadAllText(entryPath, Encoding.UTF8);
+		string baseDir = Path.GetDirectoryName(entryPath);
+		input = Regex.Replace(input, "<link\\b(?=[^>]*?\\brel\\s*=\\s*[\"']?stylesheet[\"']?)(?=[^>]*?\\bhref\\s*=\\s*(?:[\"'](?<href>[^\"'\\s>]+)[\"']|(?<href>[^\"'\\s>]+)))[^>]*?>", (Match m) =>
+		{
+			string value = m.Groups["href"].Value;
+			if (string.IsNullOrEmpty(value) || value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || value.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || value.StartsWith("//"))
+			{
+				return m.Value;
+			}
+			try
+			{
+				string fullPath = Path.GetFullPath(Path.Combine(baseDir, value.Replace('/', Path.DirectorySeparatorChar)));
+				if (File.Exists(fullPath))
+				{
+					string input2 = File.ReadAllText(fullPath, Encoding.UTF8);
+					string cssDir = Path.GetDirectoryName(fullPath);
+					input2 = CssUrlRegex.Replace(input2, (Match cm) =>
+					{
+						string text = cm.Groups["val"].Value.Trim('\'', '"', ' ');
+						if (text.StartsWith("data:", StringComparison.OrdinalIgnoreCase) || text.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || text.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+						{
+							return cm.Value;
+						}
+						try
+						{
+							string fullPath2 = Path.GetFullPath(Path.Combine(cssDir, text.Replace('/', Path.DirectorySeparatorChar)));
+							if (File.Exists(fullPath2))
+							{
+								byte[] inArray = File.ReadAllBytes(fullPath2);
+								string mimeType = GetMimeType(fullPath2);
+								return "url(\"data:" + mimeType + ";base64," + Convert.ToBase64String(inArray) + "\")";
+							}
+						}
+						catch
+						{
+						}
+						return cm.Value;
+					});
+					return "<style>\n" + input2 + "\n</style>";
+				}
+			}
+			catch
+			{
+			}
+			return m.Value;
+		}, RegexOptions.IgnoreCase);
+		input = Regex.Replace(input, "<script\\b(?=[^>]*?\\bsrc\\s*=\\s*(?:[\"'](?<src>[^\"'\\s>]+)[\"']|(?<src>[^\"'\\s>]+)))[^>]*?>\\s*</script>", (Match m) =>
+		{
+			string value = m.Groups["src"].Value;
+			if (string.IsNullOrEmpty(value) || value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || value.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || value.StartsWith("//"))
+			{
+				return m.Value;
+			}
+			try
+			{
+				string fullPath = Path.GetFullPath(Path.Combine(baseDir, value.Replace('/', Path.DirectorySeparatorChar)));
+				if (File.Exists(fullPath))
+				{
+					string text = File.ReadAllText(fullPath, Encoding.UTF8);
+					return "<script>\n" + text + "\n</script>";
+				}
+			}
+			catch
+			{
+			}
+			return m.Value;
+		}, RegexOptions.IgnoreCase);
+		input = Regex.Replace(input, "<img\\b(?=[^>]*?\\bsrc\\s*=\\s*(?:[\"'](?<src>[^\"'\\s>]+)[\"']|(?<src>[^\"'\\s>]+)))[^>]*?>", (Match m) =>
+		{
+			Group obj = m.Groups["src"];
+			string value = obj.Value;
+			if (string.IsNullOrEmpty(value) || value.StartsWith("data:", StringComparison.OrdinalIgnoreCase) || value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || value.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || value.StartsWith("//"))
+			{
+				return m.Value;
+			}
+			try
+			{
+				string fullPath = Path.GetFullPath(Path.Combine(baseDir, value.Replace('/', Path.DirectorySeparatorChar)));
+				if (File.Exists(fullPath))
+				{
+					byte[] inArray = File.ReadAllBytes(fullPath);
+					string mimeType = GetMimeType(fullPath);
+					string text = "data:" + mimeType + ";base64," + Convert.ToBase64String(inArray);
+					int num = obj.Index - m.Index;
+					return m.Value.Substring(0, num) + "\"" + text + "\"" + m.Value.Substring(num + obj.Length);
+				}
+			}
+			catch
+			{
+			}
+			return m.Value;
+		}, RegexOptions.IgnoreCase);
+		File.WriteAllText(outBundlePath, input, Encoding.UTF8);
+	}
+
+	private static string GetMimeType(string path)
+	{
+		switch (Path.GetExtension(path).ToLowerInvariant())
+		{
+		case ".png":
+			return "image/png";
+		case ".jpg":
+		case ".jpeg":
+			return "image/jpeg";
+		case ".gif":
+			return "image/gif";
+		case ".webp":
+			return "image/webp";
+		case ".svg":
+			return "image/svg+xml";
+		case ".ico":
+			return "image/x-icon";
+		case ".bmp":
+			return "image/bmp";
+		case ".woff":
+			return "font/woff";
+		case ".woff2":
+			return "font/woff2";
+		case ".ttf":
+			return "font/ttf";
+		case ".eot":
+			return "application/vnd.ms-fontobject";
+		case ".css":
+			return "text/css";
+		case ".js":
+			return "application/javascript";
+		default:
+			return "application/octet-stream";
+		}
+	}
+
+	private string RewriteHtml(string html, string pageUrl, string pageLocalRel)
+	{
+		Uri baseUri = new Uri(pageUrl);
+		html = Regex.Replace(html, "<base\\b[^>]*>", "", RegexOptions.IgnoreCase);
+		html = Regex.Replace(html, "<meta\\b[^>]*?http-equiv\\s*=\\s*[\"']?Content-Security-Policy[\"']?[^>]*?>", "", RegexOptions.IgnoreCase);
+		html = Regex.Replace(html, "\\s+integrity\\s*=\\s*[\"'][^\"']*[\"']", "", RegexOptions.IgnoreCase);
+		html = Regex.Replace(html, "\\s+crossorigin(=[\"'][^\"']*[\"'])?", "", RegexOptions.IgnoreCase);
+		html = ScriptTagRegex.Replace(html, (Match m) => IsTracker(m.Value) ? "" : m.Value);
+		html = Regex.Replace(html, "<noscript\\b[^>]*?>[\\s\\S]*?</noscript>", (Match m) => IsTracker(m.Value) ? "" : m.Value, RegexOptions.IgnoreCase);
+		html = TagRegex.Replace(html, (Match m) =>
+		{
+			Group obj = m.Groups["val"];
+			string text = obj.Value.Trim('\'', '"', ' ', '\t', '\r', '\n').Replace("&amp;", "&");
+			if (text.StartsWith("data:", StringComparison.OrdinalIgnoreCase) || text.StartsWith("#") || text.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase))
+			{
+				return m.Value;
+			}
+			if (IsTracker(text))
+			{
+				return "";
+			}
+			if (text.StartsWith("//"))
+			{
+				text = baseUri.Scheme + ":" + text;
+			}
+			Uri result;
+			if (Uri.TryCreate(baseUri, text, out result))
+			{
+				string text2 = StripFragment(result.AbsoluteUri);
+				if (IsTracker(text2))
+				{
+					return "";
+				}
+				lock (mapLock)
+				{
+					string value;
+					if (urlMap.TryGetValue(text2, out value))
+					{
+						string text3 = ComputeRelativeLink(pageLocalRel, value);
+						int num = obj.Index - m.Index;
+						return m.Value.Substring(0, num) + text3 + m.Value.Substring(num + obj.Length);
+					}
+				}
+			}
+			return m.Value;
+		});
+		html = AnchorRegex.Replace(html, (Match m) =>
+		{
+			Group obj = m.Groups["val"];
+			string text = obj.Value.Trim('\'', '"', ' ', '\t', '\r', '\n').Replace("&amp;", "&");
+			if (text.StartsWith("data:", StringComparison.OrdinalIgnoreCase) || text.StartsWith("#") || text.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) || text.StartsWith("tel:", StringComparison.OrdinalIgnoreCase) || text.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase))
+			{
+				return m.Value;
+			}
+			if (IsTracker(text))
+			{
+				return "";
+			}
+			if (text.StartsWith("//"))
+			{
+				text = baseUri.Scheme + ":" + text;
+			}
+			Uri result;
+			if (Uri.TryCreate(baseUri, text, out result))
+			{
+				string text2 = StripFragment(result.AbsoluteUri);
+				if (IsTracker(text2))
+				{
+					return "";
+				}
+				lock (mapLock)
+				{
+					string value;
+					if (urlMap.TryGetValue(text2, out value))
+					{
+						string text3 = ComputeRelativeLink(pageLocalRel, value);
+						int num = obj.Index - m.Index;
+						return m.Value.Substring(0, num) + text3 + m.Value.Substring(num + obj.Length);
+					}
+				}
+			}
+			return m.Value;
+		});
+		return html;
+	}
+
+	private string RewriteCss(string css, string cssUrl, string cssLocalRel)
+	{
+		Uri baseUri = new Uri(cssUrl);
+		css = CssImportRegex.Replace(css, (Match m) =>
+		{
+			Group obj = m.Groups["val"];
+			string text = obj.Value.Trim('\'', '"', ' ', '\t', '\r', '\n');
+			if (text.StartsWith("data:", StringComparison.OrdinalIgnoreCase) || text.StartsWith("#"))
+			{
+				return m.Value;
+			}
+			if (IsTracker(text))
+			{
+				return "";
+			}
+			if (text.StartsWith("//"))
+			{
+				text = baseUri.Scheme + ":" + text;
+			}
+			Uri result;
+			if (Uri.TryCreate(baseUri, text, out result))
+			{
+				string text2 = StripFragment(result.AbsoluteUri);
+				if (IsTracker(text2))
+				{
+					return "";
+				}
+				lock (mapLock)
+				{
+					string value;
+					if (urlMap.TryGetValue(text2, out value))
+					{
+						string text3 = ComputeRelativeLink(cssLocalRel, value);
+						return "@import \"" + text3 + "\";";
+					}
+				}
+			}
+			return m.Value;
+		});
+		css = CssUrlRegex.Replace(css, (Match m) =>
+		{
+			Group obj = m.Groups["val"];
+			string text = obj.Value.Trim('\'', '"', ' ', '\t', '\r', '\n');
+			if (text.StartsWith("data:", StringComparison.OrdinalIgnoreCase) || text.StartsWith("#"))
+			{
+				return m.Value;
+			}
+			if (IsTracker(text))
+			{
+				return "";
+			}
+			if (text.StartsWith("//"))
+			{
+				text = baseUri.Scheme + ":" + text;
+			}
+			Uri result;
+			if (Uri.TryCreate(baseUri, text, out result))
+			{
+				string text2 = StripFragment(result.AbsoluteUri);
+				if (IsTracker(text2))
+				{
+					return "";
+				}
+				lock (mapLock)
+				{
+					string value;
+					if (urlMap.TryGetValue(text2, out value))
+					{
+						string text3 = ComputeRelativeLink(cssLocalRel, value);
+						return "url(\"" + text3 + "\")";
+					}
+				}
+			}
+			return m.Value;
+		});
+		return css;
+	}
+
+	private byte[] Fetch(string url, out string finalUrl, out string contentType, out string errReason)
+	{
+		finalUrl = url;
+		contentType = null;
+		errReason = "unknown";
+		try
+		{
+			HttpWebRequest httpWebRequest = (HttpWebRequest)WebRequest.Create(url);
+			httpWebRequest.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+			httpWebRequest.Accept = "*/*";
+			httpWebRequest.Headers.Add("Accept-Language", "en-US,en;q=0.9");
+			httpWebRequest.Timeout = 20000;
+			httpWebRequest.ReadWriteTimeout = 20000;
+			httpWebRequest.AllowAutoRedirect = true;
+			httpWebRequest.MaximumAutomaticRedirections = 5;
+			httpWebRequest.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+			httpWebRequest.Proxy = null;
+			httpWebRequest.KeepAlive = true;
+			using (HttpWebResponse httpWebResponse = (HttpWebResponse)httpWebRequest.GetResponse())
+			{
+				finalUrl = httpWebResponse.ResponseUri.AbsoluteUri;
+				contentType = httpWebResponse.ContentType;
+				using (Stream stream = httpWebResponse.GetResponseStream())
+				{
+					using (MemoryStream memoryStream = new MemoryStream())
+					{
+						byte[] array = new byte[32768];
+						int count;
+						while ((count = stream.Read(array, 0, array.Length)) > 0)
+						{
+							memoryStream.Write(array, 0, count);
+						}
+						return memoryStream.ToArray();
+					}
+				}
+			}
+		}
+		catch (WebException ex)
+		{
+			HttpWebResponse httpWebResponse2 = ex.Response as HttpWebResponse;
+			if (httpWebResponse2 != null)
+			{
+				errReason = "http " + (int)httpWebResponse2.StatusCode;
+			}
+			else
+			{
+				errReason = ex.Status.ToString().ToLowerInvariant();
+			}
+			return null;
+		}
+		catch (Exception ex2)
+		{
+			errReason = ex2.GetType().Name.ToLowerInvariant();
+			return null;
+		}
+	}
+
+	private string UrlToPath(string url, bool isPage)
+	{
+		Uri uri = new Uri(url);
+		string absolutePath = uri.AbsolutePath;
+		if (string.IsNullOrEmpty(absolutePath) || absolutePath == "/")
+		{
+			return "index.html";
+		}
+		string input = absolutePath.TrimStart('/');
+		input = Regex.Replace(input, "[<>:\"/\\\\|?*=&;\\s]+", "_");
+		bool flag = uri.Host.ToLowerInvariant().Equals(baseHost, StringComparison.OrdinalIgnoreCase);
+		if (isPage)
+		{
+			string text = Path.GetExtension(input).ToLowerInvariant();
+			if (text != ".html" && text != ".htm")
+			{
+				input += ".html";
+			}
+			if (!flag)
+			{
+				input = "_external/" + uri.Host.ToLowerInvariant() + "/" + input;
+			}
+			return input.ToLowerInvariant();
+		}
+		string extension = Path.GetExtension(input);
+		if (string.IsNullOrEmpty(extension))
+		{
+			input += ".file";
+		}
+		if (!flag)
+		{
+			input = "_external/" + uri.Host.ToLowerInvariant() + "/" + input;
+		}
+		return input.ToLowerInvariant();
+	}
+
+	private static string ComputeRelativeLink(string fromRelPath, string toRelPath)
+	{
+		if (fromRelPath.Equals(toRelPath, StringComparison.OrdinalIgnoreCase))
+		{
+			return Path.GetFileName(toRelPath);
+		}
+		string directoryName = Path.GetDirectoryName(fromRelPath.Replace('/', Path.DirectorySeparatorChar));
+		string text = toRelPath.Replace('/', Path.DirectorySeparatorChar);
+		if (string.IsNullOrEmpty(directoryName))
+		{
+			return toRelPath;
+		}
+		string[] array = directoryName.Split(new char[1] { Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+		string[] array2 = text.Split(new char[1] { Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+		int i = 0;
+		for (int num = Math.Min(array.Length, array2.Length); i < num && array[i].Equals(array2[i], StringComparison.OrdinalIgnoreCase); i++)
+		{
+		}
+		StringBuilder stringBuilder = new StringBuilder();
+		for (int j = i; j < array.Length; j++)
+		{
+			stringBuilder.Append("../");
+		}
+		for (int k = i; k < array2.Length; k++)
+		{
+			stringBuilder.Append(array2[k]);
+			if (k < array2.Length - 1)
+			{
+				stringBuilder.Append("/");
+			}
+		}
+		return stringBuilder.ToString();
+	}
+
+	private static string StripFragment(string url)
+	{
+		int num = url.IndexOf('#');
+		if (num < 0)
+		{
+			return url;
+		}
+		return url.Substring(0, num);
+	}
+
+	private static string FormatBytes(long bytes)
+	{
+		string[] array = new string[4] { "b", "kb", "mb", "gb" };
+		double num = bytes;
+		int num2 = 0;
+		while (num >= 1024.0 && num2 < array.Length - 1)
+		{
+			num2++;
+			num /= 1024.0;
+		}
+		return string.Format("{0:0.##} {1}", num, array[num2]);
+	}
+}
+
